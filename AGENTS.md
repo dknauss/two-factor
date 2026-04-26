@@ -115,3 +115,32 @@ Namespace: `two-factor/1.0` (constant `Two_Factor_Core::REST_NAMESPACE`). Each p
 - Follows WordPress coding standards (WPCS) and WordPress-VIP-Go rules.
 - `includes/` is excluded from PHPCS — those files intentionally override core functions.
 - PHPCS must pass and is enforced in CI.
+
+## Design Intent Review
+
+- Before writing or substantially changing code, briefly restate the problem and name the intended approach in 2–4 sentences.
+- Ask whether new code is necessary before implementing. Prefer deletion, simplification, configuration, or reuse when they solve the problem cleanly.
+- After implementation, explain whether the intended approach was followed. If the implementation changed, explain why.
+- Call out key tradeoffs, likely failure modes, and why this approach is better than the most obvious naive alternative.
+
+## Simplicity First
+
+- Always ask: Is this the simplest solution?
+- Prefer fewer moving parts, less abstraction, and less code when they satisfy the requirement.
+- If no code is the best code, say so explicitly and prefer that outcome.
+- Do not add indirection, generic abstraction, or framework machinery unless it clearly earns its cost.
+
+## Commit Practices
+
+- Use conventional commit format.
+- Run tests and static analysis before every commit.
+
+## Browser and Playwright handoff
+
+If a task in this repository requires browser automation, Playwright testing, screenshots, page interaction, or browser-only inspection:
+
+- Say clearly that a fresh browser-capable Claude session is required.
+- Do not imply that Playwright or browser mode can be enabled from inside the current session.
+- Tell the user to restart with `/Users/danknauss/bin/claude-playwright` or `/Users/danknauss/bin/claude-browser-handoff`.
+
+Use this only when browser tooling is actually needed, not when it is merely convenient.
