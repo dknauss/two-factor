@@ -1,0 +1,43 @@
+#!/bin/bash
+# Capture Xdebug profiler output from the wp-env container to profiler-output/.
+# Usage: bin/profile-capture [url-path]
+#   url-path defaults to /wp-login.php (the two-factor login flow entrypoint)
+#
+# Requires: wp-env running with --xdebug=profile
+#   npm run env start -- --xdebug=profile
+
+set -euo pipefail
+
+URL_PATH="${1:-/wp-login.php}"
+PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+OUTPUT_DIR="$PLUGIN_DIR/profiler-output"
+CONTAINER=$(docker ps --format "{{.Names}}" | grep -v "cli\|tests\|mysql" | grep -E "wordpress" | head -1)
+
+if [ -z "$CONTAINER" ]; then
+  echo "Error: no running wp-env wordpress container found." >&2
+  echo "Start it with: npm run env start -- --xdebug=profile" >&2
+  exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+
+# Clear old files
+docker exec "$CONTAINER" bash -c "rm -f /tmp/cachegrind.out.* 2>/dev/null || true"
+
+# Trigger request
+echo "Profiling: http://localhost:8888${URL_PATH}"
+curl -s "http://localhost:8888${URL_PATH}" > /dev/null
+
+# Copy new files to host
+FILES=$(docker exec "$CONTAINER" bash -c "ls /tmp/cachegrind.out.* 2>/dev/null || true")
+if [ -z "$FILES" ]; then
+  echo "No cachegrind files found. Is --xdebug=profile set?" >&2
+  exit 1
+fi
+
+for FILE in $FILES; do
+  docker cp "$CONTAINER:$FILE" "$OUTPUT_DIR/"
+done
+
+echo "Captured to: $OUTPUT_DIR"
+ls -lh "$OUTPUT_DIR"/cachegrind.out.*

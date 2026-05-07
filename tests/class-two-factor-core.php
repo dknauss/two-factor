@@ -48,9 +48,22 @@ class Test_ClassTwoFactorCore extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Ensure the auth-cookie simulation hooks are available for each test.
+	 */
+	public function set_up() {
+		parent::set_up();
+
+		add_action( 'set_auth_cookie', array( __CLASS__, 'set_auth_cookie' ) );
+		add_action( 'set_logged_in_cookie', array( __CLASS__, 'set_logged_in_cookie' ) );
+	}
+
+	/**
 	 * Cleanup after each test.
 	 */
 	public function tearDown(): void {
+		remove_action( 'set_auth_cookie', array( __CLASS__, 'set_auth_cookie' ) );
+		remove_action( 'set_logged_in_cookie', array( __CLASS__, 'set_logged_in_cookie' ) );
+
 		parent::tearDown();
 
 		unset( $_COOKIE[ AUTH_COOKIE ], $_COOKIE[ LOGGED_IN_COOKIE ] );
@@ -181,6 +194,87 @@ class Test_ClassTwoFactorCore extends WP_UnitTestCase {
 		ob_start();
 		Two_Factor_Core::user_two_factor_options( $user );
 		return ob_get_clean();
+	}
+
+	/**
+	 * Temporarily replace request globals for the duration of a callback.
+	 *
+	 * @param array    $request Request data.
+	 * @param string   $method HTTP request method.
+	 * @param callable $callback Code to execute while the globals are replaced.
+	 * @return mixed
+	 */
+	private function with_request_globals( array $request, $method, callable $callback ) {
+		$original_request        = $_REQUEST;
+		$original_get            = $_GET;
+		$original_post           = $_POST;
+		$original_request_method = $_SERVER['REQUEST_METHOD'] ?? null;
+
+		$_REQUEST = $request;
+		$_GET     = 'GET' === $method ? $request : array();
+		$_POST    = 'POST' === $method ? $request : array();
+
+		if ( null === $original_request_method ) {
+			unset( $_SERVER['REQUEST_METHOD'] );
+		}
+
+		$_SERVER['REQUEST_METHOD'] = $method;
+
+		try {
+			return $callback();
+		} finally {
+			$_REQUEST = $original_request;
+			$_GET     = $original_get;
+			$_POST    = $original_post;
+
+			if ( null === $original_request_method ) {
+				unset( $_SERVER['REQUEST_METHOD'] );
+			} else {
+				$_SERVER['REQUEST_METHOD'] = $original_request_method;
+			}
+		}
+	}
+
+	/**
+	 * Render the two-factor login form and return the markup.
+	 *
+	 * @param WP_User       $user User instance.
+	 * @param string        $login_nonce Login nonce value.
+	 * @param string        $redirect_to Redirect target.
+	 * @param string        $provider Provider key.
+	 * @param string        $action Login action.
+	 * @param array<string> $request Request data to expose while rendering.
+	 * @return string
+	 */
+	private function render_login_html( WP_User $user, $login_nonce, $redirect_to, $provider, $action = 'validate_2fa', array $request = array() ) {
+		return $this->with_request_globals(
+			$request,
+			'GET',
+			static function () use ( $user, $login_nonce, $redirect_to, $provider, $action ) {
+				ob_start();
+				Two_Factor_Core::login_html( $user, $login_nonce, $redirect_to, '', $provider, $action );
+				return ob_get_clean();
+			}
+		);
+	}
+
+	/**
+	 * Complete a successful dummy-provider two-factor login.
+	 *
+	 * @param WP_User $user User instance.
+	 * @param string  $redirect_to Redirect target.
+	 * @return string|null
+	 */
+	private function perform_successful_dummy_two_factor_login( WP_User $user, $redirect_to = '' ) {
+		$login_nonce = Two_Factor_Core::create_login_nonce( $user->ID );
+
+		$this->assertNotFalse( $login_nonce );
+
+		return $this->do_redirect_callable(
+			function () use ( $user, $login_nonce, $redirect_to ) {
+				Two_Factor_Core::_login_form_validate_2fa( $user, $login_nonce['key'], 'Two_Factor_Dummy', $redirect_to, true );
+			}
+		);
 	}
 
 	/**
@@ -1349,6 +1443,91 @@ class Test_ClassTwoFactorCore extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Validate the public login_form_validate_2fa() action handler completes a
+	 * successful login and redirects to the requested destination.
+	 *
+	 * @covers Two_Factor_Core::login_form_validate_2fa
+	 */
+	public function test_login_form_validate_2fa_action_success() {
+		$user        = $this->get_dummy_user( array( 'Two_Factor_Dummy' => 'Two_Factor_Dummy' ) );
+		$login_nonce = Two_Factor_Core::create_login_nonce( $user->ID );
+		$redirect_to = admin_url( 'profile.php?page=two-factor-test' );
+
+		$this->assertNotFalse( $login_nonce );
+
+		$redirect_url = $this->with_request_globals(
+			array(
+				'wp-auth-id'    => (string) $user->ID,
+				'wp-auth-nonce' => $login_nonce['key'],
+				'provider'      => 'Two_Factor_Dummy',
+				'redirect_to'   => $redirect_to,
+				'rememberme'    => '1',
+			),
+			'POST',
+			function () {
+				return $this->do_redirect_callable( array( 'Two_Factor_Core', 'login_form_validate_2fa' ) );
+			}
+		);
+
+		$this->assertSame( $redirect_to, $redirect_url );
+		$this->assertEmpty( get_user_meta( $user->ID, Two_Factor_Core::USER_META_NONCE_KEY, true ) );
+		$this->assertEmpty( get_user_meta( $user->ID, Two_Factor_Core::USER_RATE_LIMIT_KEY, true ) );
+		$this->assertEmpty( get_user_meta( $user->ID, Two_Factor_Core::USER_FAILED_LOGIN_ATTEMPTS_KEY, true ) );
+		$this->assertNotEmpty( $_COOKIE[ AUTH_COOKIE ] );
+		$this->assertNotEmpty( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		$this->assertNotFalse( Two_Factor_Core::is_current_user_session_two_factor() );
+
+		$manager = WP_Session_Tokens::get_instance( $user->ID );
+		$token   = wp_get_session_token();
+		$session = $manager->get( $token );
+
+		$this->assertSame( 'Two_Factor_Dummy', $session['two-factor-provider'] );
+		$this->assertArrayHasKey( 'two-factor-login', $session );
+	}
+
+	/**
+	 * Validate the public login_form_revalidate_2fa() action handler refreshes
+	 * the two-factor session timestamp and redirects back to the requested page.
+	 *
+	 * @covers Two_Factor_Core::login_form_revalidate_2fa
+	 */
+	public function test_login_form_revalidate_2fa_action_success() {
+		$user = $this->get_dummy_user( array( 'Two_Factor_Dummy' => 'Two_Factor_Dummy' ) );
+
+		$initial_redirect = $this->perform_successful_dummy_two_factor_login( $user, admin_url() );
+		$this->assertSame( admin_url(), $initial_redirect );
+
+		$manager = WP_Session_Tokens::get_instance( $user->ID );
+		$token   = wp_get_session_token();
+		$session = $manager->get( $token );
+
+		$session['two-factor-login'] = time() - HOUR_IN_SECONDS;
+		$manager->update( $token, $session );
+
+		$expired_login = Two_Factor_Core::is_current_user_session_two_factor();
+		$redirect_to   = admin_url( 'profile.php?page=two-factor-revalidate' );
+
+		$redirect_url = $this->with_request_globals(
+			array(
+				'wp-auth-nonce' => wp_create_nonce( 'two_factor_revalidate_' . $user->ID ),
+				'provider'      => 'Two_Factor_Dummy',
+				'redirect_to'   => $redirect_to,
+			),
+			'POST',
+			function () {
+				return $this->do_redirect_callable( array( 'Two_Factor_Core', 'login_form_revalidate_2fa' ) );
+			}
+		);
+
+		$this->assertSame( $redirect_to, $redirect_url );
+
+		$updated_session = Two_Factor_Core::get_current_user_session();
+		$this->assertSame( 'Two_Factor_Dummy', $updated_session['two-factor-provider'] );
+		$this->assertGreaterThan( $expired_login, $updated_session['two-factor-login'] );
+		$this->assertGreaterThanOrEqual( time() - MINUTE_IN_SECONDS, $updated_session['two-factor-login'] );
+	}
+
+	/**
 	 * Test current user can update two factor options functionality.
 	 *
 	 * @covers Two_Factor_Core::current_user_can_update_two_factor_options()
@@ -2165,6 +2344,75 @@ class Test_ClassTwoFactorCore extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'validate_2fa_form', $output, 'Output contains two-factor form for current user' );
 
 		$this->clean_dummy_user();
+	}
+
+	/**
+	 * Test login_html renders the validate form, provider prompt, and backup
+	 * links for an enabled secondary provider.
+	 *
+	 * @covers Two_Factor_Core::login_html
+	 * @covers Two_Factor_Core::rememberme
+	 */
+	public function test_login_html_renders_validate_form_with_backup_links() {
+		$user = $this->get_dummy_user(
+			array(
+				'Two_Factor_Dummy' => 'Two_Factor_Dummy',
+				'Two_Factor_Email' => 'Two_Factor_Email',
+			)
+		);
+
+		$output = $this->render_login_html(
+			$user,
+			'login-nonce-value',
+			admin_url( 'profile.php?page=two-factor-ui-test' ),
+			'Two_Factor_Dummy',
+			'validate_2fa',
+			array(
+				'rememberme' => '1',
+			)
+		);
+
+		$this->assertStringContainsString( 'action="' . esc_url( Two_Factor_Core::login_url( array( 'action' => 'validate_2fa' ), 'login_post' ) ) . '"', $output );
+		$this->assertStringContainsString( 'name="provider"      id="provider"      value="Two_Factor_Dummy"', $output );
+		$this->assertStringContainsString( 'name="wp-auth-id"    id="wp-auth-id"    value="' . $user->ID . '"', $output );
+		$this->assertStringContainsString( 'name="wp-auth-nonce" id="wp-auth-nonce" value="login-nonce-value"', $output );
+		$this->assertStringContainsString( 'name="rememberme"    id="rememberme"    value="1"', $output );
+		$this->assertStringContainsString( 'Are you really you?', $output );
+		$this->assertStringContainsString( 'Having Problems?', $output );
+		$this->assertStringContainsString( 'Send a code to your email', $output );
+	}
+
+	/**
+	 * Test login_html renders the revalidation form with interim-login state and
+	 * TOTP provider UI.
+	 *
+	 * @covers Two_Factor_Core::login_html
+	 */
+	public function test_login_html_renders_revalidation_form_for_totp_provider() {
+		$user = self::factory()->user->create_and_get();
+		$totp = Two_Factor_Totp::get_instance();
+
+		$totp->set_user_totp_key( $user->ID, 'JBSWY3DPEHPK3PXP' );
+		Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Totp' );
+
+		$output = $this->render_login_html(
+			$user,
+			'revalidate-nonce',
+			admin_url( 'profile.php?page=two-factor-ui-test' ),
+			'Two_Factor_Totp',
+			'revalidate_2fa',
+			array(
+				'interim-login' => '1',
+			)
+		);
+
+		$this->assertStringContainsString( 'action="' . esc_url( Two_Factor_Core::login_url( array( 'action' => 'revalidate_2fa' ), 'login_post' ) ) . '"', $output );
+		$this->assertStringContainsString( 'name="provider"      id="provider"      value="Two_Factor_Totp"', $output );
+		$this->assertStringContainsString( 'name="interim-login" value="1"', $output );
+		$this->assertStringNotContainsString( 'name="redirect_to"', $output );
+		$this->assertStringContainsString( 'Enter the code generated by your authenticator app.', $output );
+		$this->assertStringContainsString( 'Authentication Code:', $output );
+		$this->assertStringContainsString( 'name="authcode"', $output );
 	}
 
 	/**

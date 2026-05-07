@@ -1,11 +1,13 @@
 # Directories
 /dist/
 /node_modules/
+/profiler-output/
 /tests/logs/
 /vendor/
 
 # Files
 .DS_Store
+.wp-env.override.json
 /npm-debug.log
 .phpunit.result.cache
 phpstan.neon
