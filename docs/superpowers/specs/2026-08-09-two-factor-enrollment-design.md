@@ -109,7 +109,7 @@ apply_filters( 'two_factor_enrollment_deferrable', false, $user );
 
 Completion is **not** a third filter. It is
 `Two_Factor_Core::is_user_using_two_factor( $user )`, which resolves true exactly
-when a primary provider is configured (`class-two-factor-core.php:857`). One source
+when a primary provider is configured. One source
 of truth; no parallel state to drift.
 
 Both defaults are `false`, so installing this plugin alone changes nothing.
@@ -145,7 +145,7 @@ Bootstrap `two-factor-enrollment.php` carries `Requires Plugins: two-factor`
    always returns true, so Email becomes primary without a second filter.
 3. `Two_Factor_Core::filter_authenticate()` runs at priority 31, sees
    `is_user_using_two_factor() === true`, and adds
-   `send_auth_cookies => __return_false` (`class-two-factor-core.php:920`).
+   `send_auth_cookies => __return_false`.
    **No auth cookie is issued.**
 4. `Two_Factor_Core::wp_login()` renders core's existing Email challenge and exits.
 5. The user enters the emailed code. Core validates it, issues the auth cookie, and
@@ -254,10 +254,9 @@ callbacks.
   the confusion this whole design is trying to avoid.
 
 `Two_Factor_Core::filter_session_information()` copies any `two-factor-` prefixed key
-forward across session regeneration (`class-two-factor-core.php:2652`), so the flag is
+forward across session regeneration, so the flag is
 sticky by construction and cannot be shed accidentally.
-`update_current_user_session()` supports explicit null-clearing
-(`class-two-factor-core.php:2579`).
+`update_current_user_session()` supports explicit null-clearing.
 
 **Layer 4 · Completion.** On successful verification: clear the pending flag
 explicitly, rotate the session token so the password-only token cannot be replayed,
@@ -281,10 +280,10 @@ Two upstream behaviors make it worse than it first appears:
 
 - `Two_Factor_Core::user_two_factor_options_update()` calls
   `wp_destroy_other_sessions()` on first-time enrollment
-  (`class-two-factor-core.php:2560`), so the attacker who enrolls first also logs the
+  (`Two_Factor_Core::user_two_factor_options_update()`), so the attacker who enrolls first also logs the
   legitimate user out everywhere.
 - The plugin sends **no mail on enrollment**. `wp_mail` appears only in the
-  compromised-password path (`class-two-factor-core.php:2041`). Enrolling a second
+  compromised-password path (`Two_Factor_Core::notify_user_password_reset()`). Enrolling a second
   factor is silent.
 
 **Mitigation on the required path: the race is closed.** Enrollment requires entering
@@ -357,7 +356,7 @@ ships:
    inherit it and neither mentions it.
 3. **The REST permission gate** — `rest_api_can_edit_user_and_update_two_factor_options`
    hard-returns on `current_user_can( 'edit_user' )` before any filter
-   (`class-two-factor-core.php:1559`), which is the concrete reason pre-cookie
+  , which is the concrete reason pre-cookie
    provider configuration is impossible. This corroborates #934 independently.
 4. **Email-first enrollment closes the race** — the design argument in §8, relevant
    to #813's wizard scope.
