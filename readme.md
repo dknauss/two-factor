@@ -34,6 +34,8 @@ To use the provided development environment, you'll first need to install and la
 
 See `package.json` for other available scripts you might want to use during development, like linting and testing.
 
+`npm install` also sets up a Git pre-commit hook that runs PHPCS on the PHP files you stage, so coding standards issues are caught before they reach CI. Use `npm run format:php` to fix many of them automatically.
+
 When you're ready, open [a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/) with the suggested changes.
 
 ## Testing
