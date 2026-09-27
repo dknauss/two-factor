@@ -33,6 +33,8 @@ npm run lint:js         # wp-scripts lint-js
 npm run format          # auto-fix PHPCS and JS/CSS issues
 ```
 
+A Husky pre-commit hook (`.husky/pre-commit`, installed by `npm install`) runs PHPCS on the staged PHP files and blocks the commit if it finds issues. It is skipped when `vendor/bin/phpcs` is missing (run `composer install`). Do not bypass it with `--no-verify`; fix the reported issues instead.
+
 ### Build
 
 ```bash

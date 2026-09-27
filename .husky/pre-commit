@@ -1,0 +1,23 @@
+# Run PHPCS against the staged PHP files so coding standards issues are caught
+# before they reach CI. Uses the same ruleset as `npm run lint:php`.
+#
+# Note: PHPCS checks the working-tree copy of each staged file, so unstaged
+# edits to a staged file are linted too.
+#
+# Bypass in an emergency with `git commit --no-verify`.
+
+if ! git diff --cached --name-only --diff-filter=ACMR -- '*.php' | grep -q .; then
+	exit 0
+fi
+
+if [ ! -x vendor/bin/phpcs ]; then
+	echo "pre-commit: vendor/bin/phpcs not found, skipping PHPCS. Run \`composer install\` to enable it."
+	exit 0
+fi
+
+if ! vendor/bin/phpcs -q --filter=GitStaged; then
+	echo ""
+	echo "pre-commit: PHPCS found issues in the staged files."
+	echo "Fix them (\`npm run format:php\` can fix many automatically), stage the changes, and commit again."
+	exit 1
+fi
