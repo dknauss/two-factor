@@ -16,6 +16,8 @@ For code coverage support: `npm run env start -- --xdebug=coverage`
 
 `npm test` and `npm run composer` are wrappers that execute commands inside the `tests-cli` wp-env container at the plugin path. Tests must be run through these wrappers, not directly with `phpunit`.
 
+Exception: Claude Code on the web has no Docker. There, `.claude/hooks/session-start.sh` installs the Composer and npm dependencies, MariaDB and a `wordpress-develop` test library at session start and exports `WP_TESTS_DIR`, so tests run directly with `vendor/bin/phpunit` (for example `vendor/bin/phpunit --filter test_create_login_nonce`). The linters run as usual.
+
 ## Commands
 
 ### Testing
