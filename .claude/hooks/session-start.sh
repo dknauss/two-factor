@@ -71,10 +71,25 @@ if ! mysqladmin ping --silent 2>/dev/null; then
 fi
 mysql -e "CREATE DATABASE IF NOT EXISTS wordpress_test; CREATE USER IF NOT EXISTS 'wp'@'localhost' IDENTIFIED BY 'wp'; GRANT ALL ON wordpress_test.* TO 'wp'@'localhost';"
 
-if [ ! -f "$WP_TESTS_DIR/includes/functions.php" ]; then
+# Test against the latest WordPress release, like wp-env's default core. Set
+# WP_DEVELOP_REF to a wordpress-develop branch or tag (e.g. trunk) to match a
+# different CI matrix leg. The checkout is re-cloned when the ref changes, so
+# a new release is picked up by the next session.
+WP_DEVELOP_REPO=https://github.com/WordPress/wordpress-develop
+WP_DEVELOP_REF_FILE="$WP_DEVELOP_DIR/.wp-develop-ref"
+if [ -z "${WP_DEVELOP_REF:-}" ]; then
+	WP_DEVELOP_REF=$(git ls-remote --tags --refs "$WP_DEVELOP_REPO" 2>/dev/null | sed 's#.*refs/tags/##' | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -V | tail -n 1 || true)
+fi
+if [ -z "$WP_DEVELOP_REF" ]; then
+	# Offline: keep whatever is cached, or fall back to trunk.
+	WP_DEVELOP_REF=$(cat "$WP_DEVELOP_REF_FILE" 2>/dev/null || echo trunk)
+fi
+
+if [ ! -f "$WP_TESTS_DIR/includes/functions.php" ] || [ "$(cat "$WP_DEVELOP_REF_FILE" 2>/dev/null)" != "$WP_DEVELOP_REF" ]; then
 	rm -rf "$WP_DEVELOP_DIR"
-	git clone -q --depth 1 --filter=blob:none --sparse https://github.com/WordPress/wordpress-develop "$WP_DEVELOP_DIR"
+	git -c advice.detachedHead=false clone -q --depth 1 --branch "$WP_DEVELOP_REF" --filter=blob:none --sparse "$WP_DEVELOP_REPO" "$WP_DEVELOP_DIR"
 	git -C "$WP_DEVELOP_DIR" sparse-checkout set src tests/phpunit/includes tests/phpunit/data
+	echo "$WP_DEVELOP_REF" > "$WP_DEVELOP_REF_FILE"
 fi
 
 cat > "$WP_DEVELOP_DIR/wp-tests-config.php" <<'PHP'
@@ -89,6 +104,9 @@ define( 'DB_HOST', 'localhost' );
 define( 'DB_CHARSET', 'utf8' );
 define( 'DB_COLLATE', '' );
 $table_prefix = 'wptests_';
+// Mirror the tests environment in .wp-env.json.
+define( 'WP_SITEURL', 'https://example.org' );
+define( 'WP_HOME', 'https://example.org' );
 define( 'WP_TESTS_DOMAIN', 'example.org' );
 define( 'WP_TESTS_EMAIL', 'admin@example.org' );
 define( 'WP_TESTS_TITLE', 'Test Blog' );
