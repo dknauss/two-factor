@@ -27,7 +27,7 @@ For code coverage support: `npm run env start -- --xdebug=coverage`
 ```bash
 npm run lint            # all linters (PHP, CSS, JS)
 npm run lint:php        # PHPCS with WordPress + VIP-Go standards
-npm run lint:phpstan    # PHPStan static analysis (level 2)
+npm run lint:phpstan    # PHPStan static analysis (level 5)
 npm run lint:css        # wp-scripts lint-style
 npm run lint:js         # wp-scripts lint-js
 npm run format          # auto-fix PHPCS and JS/CSS issues
